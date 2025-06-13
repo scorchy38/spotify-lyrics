@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 offset_service = OffsetService()
 
 
-@router.get("/health")
+@router.get("/")
 async def health_check():
     return {"status": "healthy", "service": "lyrics-api"}
 
