@@ -1,5 +1,4 @@
 import logging
-
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,7 +25,6 @@ app.include_router(
     prefix="",
 )
 
-handler = app
 
 if __name__ == "__main__":
     import uvicorn

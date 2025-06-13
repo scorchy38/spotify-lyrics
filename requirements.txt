@@ -1,0 +1,6 @@
+fastapi>=0.115.12
+python-dotenv==1.1.0
+redis>=6.2.0
+spotipy>=2.25.1
+syrics>=0.1.2.0
+uvicorn>=0.34.3
