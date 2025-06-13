@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Dict, Any, Union
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from syrics.api import Spotify
@@ -9,27 +9,22 @@ import os
 from dotenv import load_dotenv
 import logging
 
-# Load environment variables
 load_dotenv()
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Lyrics API", description="Lyrics fetching service for YouTube videos")
+app = FastAPI(title="Lyrics API", description="Lyrics fetching service for YouTube videos from Spotify")
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize Spotify clients
 try:
-    # Official Spotify API for track searching
     spotify_api = spotipy.Spotify(
         client_credentials_manager=SpotifyClientCredentials(
             client_id=os.getenv("SPOTIFY_CLIENT_ID"),
@@ -37,7 +32,6 @@ try:
         )
     )
 
-    # Syrics for lyrics fetching
     lyrics_api = Spotify(os.getenv("SPOTIFY_SP_DC"))
 
 except Exception as e:
@@ -46,11 +40,10 @@ except Exception as e:
     lyrics_api = None
 
 
-# Pydantic models
 class Track(BaseModel):
     id: str
     name: str
-    artists: List[Dict[str, Any]]
+    artists: dict[str, list[dict[str, dict[str, Any]]]]
     albumOfTrack: Dict[str, Any]
     durationMs: int
 
@@ -74,11 +67,6 @@ class LyricsData(BaseModel):
     language: str
     isRtlLanguage: bool
     capStatus: str
-
-
-class LyricsResponse(BaseModel):
-    lyrics: LyricsData
-    offset: int
 
 
 class ErrorResponse(BaseModel):
@@ -107,14 +95,15 @@ class SetOffsetRequest(BaseModel):
 def transform_spotify_track_to_extension_format(track_data: Dict) -> Track:
     """Transform Spotify API track data to extension format"""
     try:
-        # Extract album cover art
         album_images = track_data['album'].get('images', [])
         cover_art_sources = [{"url": img["url"]} for img in album_images]
 
         return Track(
             id=track_data['id'],
             name=track_data['name'],
-            artists=[{"name": artist["name"]} for artist in track_data['artists']],
+            artists={
+                "items": [{"profile": {"name": artist["name"]}} for artist in track_data['artists']]
+            },
             albumOfTrack={
                 "name": track_data['album']['name'],
                 "coverArt": {
@@ -139,7 +128,6 @@ def transform_syrics_lyrics_to_extension_format(syrics_data: Dict) -> LyricsData
         elif 'lines' in syrics_data:
             syrics_lines = syrics_data['lines']
         else:
-            # If no synchronized lyrics, create a simple format
             return LyricsData(
                 syncType="UNSYNCED",
                 lines=[],
@@ -154,7 +142,6 @@ def transform_syrics_lyrics_to_extension_format(syrics_data: Dict) -> LyricsData
                 capStatus="NONE"
             )
 
-        # Transform lines
         for line in syrics_lines:
             lines.append(LyricsLine(
                 startTimeMs=str(line.get('startTimeMs', '0')),
@@ -183,25 +170,21 @@ def transform_syrics_lyrics_to_extension_format(syrics_data: Dict) -> LyricsData
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
     return {"status": "healthy", "service": "lyrics-api"}
 
 
 @app.post("/getTracks")
 async def get_tracks(request: GetTracksRequest) -> List[Track]:
-    """Search for tracks using Spotify API"""
     if not spotify_api:
         raise HTTPException(status_code=503, detail="Spotify API not available")
 
     try:
-        # Search for tracks
         results = spotify_api.search(q=request.query, type='track', limit=30)
         tracks = []
 
         for item in results['tracks']['items']:
             track = transform_spotify_track_to_extension_format(item)
             tracks.append(track)
-        print(tracks)
         return tracks
 
     except Exception as e:
@@ -212,19 +195,14 @@ async def get_tracks(request: GetTracksRequest) -> List[Track]:
 @app.post("/fetchLyrics")
 async def fetch_lyrics(
         request: Union[FetchLyricsWithTrackRequest, FetchLyricsWithQueryRequest]
-) -> Union[LyricsResponse, ErrorResponse]:
-    """Fetch lyrics for a track or search query"""
+) -> Union[dict, ErrorResponse]:
     if not lyrics_api:
         raise HTTPException(status_code=503, detail="Lyrics API not available")
 
     try:
-        track_id = None
-
-        # If we have a track object, use its ID
         if hasattr(request, 'track') and request.track:
             track_id = request.track.id
         else:
-            # Search for the track first
             if not spotify_api:
                 return ErrorResponse(error="LoggedOut")
 
@@ -234,22 +212,36 @@ async def fetch_lyrics(
 
             track_id = results['tracks']['items'][0]['id']
 
-        # Fetch lyrics using syrics
         try:
             syrics_response = lyrics_api.get_lyrics(track_id)
 
             if not syrics_response:
                 return ErrorResponse(error="LyricsNotFound")
 
-            # Transform to extension format
             lyrics_data = transform_syrics_lyrics_to_extension_format(syrics_response)
 
-            print(lyrics_data)
-
-            return LyricsResponse(
-                lyrics=lyrics_data,
-                offset=0
-            )
+            response_data = {
+                "lyrics": {
+                    "syncType": lyrics_data.syncType,
+                    "lines": [line.model_dump() for line in lyrics_data.lines],
+                    "provider": lyrics_data.provider,
+                    "providerLyricsId": lyrics_data.providerLyricsId,
+                    "providerDisplayName": lyrics_data.providerDisplayName,
+                    "syncLyricsUri": lyrics_data.syncLyricsUri,
+                    "isDenseTypeface": lyrics_data.isDenseTypeface,
+                    "alternatives": lyrics_data.alternatives,
+                    "language": lyrics_data.language,
+                    "isRtlLanguage": lyrics_data.isRtlLanguage,
+                    "capStatus": lyrics_data.capStatus,
+                    "colors": {
+                        "background": 3429719594,
+                        "text": 3019898879,
+                        "highlightText": 4278255615
+                    }
+                },
+                "offset": 0
+            }
+            return response_data
 
         except Exception as lyrics_error:
             logger.error(f"Error fetching lyrics for track {track_id}: {lyrics_error}")
