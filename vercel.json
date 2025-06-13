@@ -20,11 +20,6 @@
     "PYTHONPATH": ".",
     "ENVIRONMENT": "production"
   },
-  "functions": {
-    "main.py": {
-      "maxDuration": 30
-    }
-  },
   "installCommand": "pip install .",
   "buildCommand": "echo 'Build completed'"
 }
