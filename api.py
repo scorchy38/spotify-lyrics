@@ -6,6 +6,8 @@ import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from syrics.api import Spotify
 import os
+import json
+from pathlib import Path
 from dotenv import load_dotenv
 import logging
 
@@ -23,6 +25,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+STORAGE_DIR = Path("data")
+OFFSETS_FILE = STORAGE_DIR / "video_offsets.json"
+
+STORAGE_DIR.mkdir(exist_ok=True)
+
+if not OFFSETS_FILE.exists():
+    with open(OFFSETS_FILE, 'w') as f:
+        json.dump({}, f)
 
 try:
     spotify_api = spotipy.Spotify(
@@ -92,8 +103,34 @@ class SetOffsetRequest(BaseModel):
     offset: int
 
 
+def load_offsets() -> Dict[str, int]:
+    try:
+        with open(OFFSETS_FILE, 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_offsets(offsets: Dict[str, int]):
+    try:
+        with open(OFFSETS_FILE, 'w') as f:
+            json.dump(offsets, f, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving offsets: {e}")
+
+
+def get_video_offset(video_id: str) -> int:
+    offsets = load_offsets()
+    return offsets.get(video_id, 0)
+
+
+def set_video_offset(video_id: str, offset: int):
+    offsets = load_offsets()
+    offsets[video_id] = offset
+    save_offsets(offsets)
+
+
 def transform_spotify_track_to_extension_format(track_data: Dict) -> Track:
-    """Transform Spotify API track data to extension format"""
     try:
         album_images = track_data['album'].get('images', [])
         cover_art_sources = [{"url": img["url"]} for img in album_images]
@@ -118,11 +155,9 @@ def transform_spotify_track_to_extension_format(track_data: Dict) -> Track:
 
 
 def transform_syrics_lyrics_to_extension_format(syrics_data: Dict) -> LyricsData:
-    """Transform syrics lyrics data to extension format"""
     try:
         lines = []
 
-        # Handle different syrics response formats
         if 'lyrics' in syrics_data and 'lines' in syrics_data['lyrics']:
             syrics_lines = syrics_data['lyrics']['lines']
         elif 'lines' in syrics_data:
@@ -220,6 +255,8 @@ async def fetch_lyrics(
 
             lyrics_data = transform_syrics_lyrics_to_extension_format(syrics_response)
 
+            video_offset = get_video_offset(request.videoID) if hasattr(request, 'videoID') else 0
+
             response_data = {
                 "lyrics": {
                     "syncType": lyrics_data.syncType,
@@ -239,7 +276,7 @@ async def fetch_lyrics(
                         "highlightText": 4278255615
                     }
                 },
-                "offset": 0
+                "offset": video_offset
             }
             return response_data
 
@@ -254,10 +291,8 @@ async def fetch_lyrics(
 
 @app.post("/setOffset")
 async def set_offset(request: SetOffsetRequest):
-    """Set offset for a video (placeholder - implement with your storage solution)"""
     try:
-        # This would typically save to a database
-        # For now, just return success
+        set_video_offset(request.videoID, request.offset)
         logger.info(f"Setting offset {request.offset} for video {request.videoID}")
         return {"success": True}
 
