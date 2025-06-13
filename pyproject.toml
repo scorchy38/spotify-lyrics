@@ -1,0 +1,12 @@
+[project]
+name = "spotify-lyrics"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.12",
+    "python-dotenv>=1.1.0",
+    "spotipy>=2.25.1",
+    "syrics>=0.1.2.0",
+    "uvicorn>=0.34.3",
+]
